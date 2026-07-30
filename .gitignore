@@ -1,0 +1,21 @@
+# Input and generated data
+export.zip
+output/
+downloaded/
+
+# AWS SAM local/deployment files
+.aws-sam/
+samconfig.toml
+
+# Local backup
+template.backup.yaml
+
+# Python environment and cache
+.venv/
+.pytest_cache/
+__pycache__/
+*.pyc
+
+# Secrets
+.env
+.env.*

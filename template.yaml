@@ -1,0 +1,101 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Secure batch pipeline for e-commerce interaction exports.
+
+Resources:
+  DataBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub 'ecommerce-interactions-${AWS::AccountId}-${AWS::Region}'
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+
+  PipelineFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      PackageType: Zip
+      CodeUri: app/
+      Handler: lambda_handler.lambda_handler
+      Runtime: python3.13
+      Architectures:
+        - arm64
+      MemorySize: 512
+      Timeout: 60
+     
+      Environment:
+        Variables:
+          INPUT_PREFIX: incoming/
+          PROCESSED_PREFIX: processed/
+          REJECTED_PREFIX: rejected/
+          REPORTS_PREFIX: reports/
+          MAX_ZIP_SIZE_MB: '50'
+          MAX_UNCOMPRESSED_SIZE_MB: '150'
+          MAX_MEMBER_COUNT: '100'
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - Version: '2012-10-17'
+          Statement:
+            - Sid: ReadIncomingArchives
+              Effect: Allow
+              Action:
+                - s3:GetObject
+                - s3:GetObjectVersion
+              Resource: !Sub 'arn:${AWS::Partition}:s3:::ecommerce-interactions-${AWS::AccountId}-${AWS::Region}/incoming/*'
+            - Sid: WritePipelineArtifacts
+              Effect: Allow
+              Action:
+                - s3:PutObject
+              Resource:
+                - !Sub 'arn:${AWS::Partition}:s3:::ecommerce-interactions-${AWS::AccountId}-${AWS::Region}/processed/*'
+                - !Sub 'arn:${AWS::Partition}:s3:::ecommerce-interactions-${AWS::AccountId}-${AWS::Region}/rejected/*'
+                - !Sub 'arn:${AWS::Partition}:s3:::ecommerce-interactions-${AWS::AccountId}-${AWS::Region}/reports/*'
+      Events:
+        IncomingZipCreated:
+          Type: S3
+          Properties:
+            Bucket: !Ref DataBucket
+            Events: s3:ObjectCreated:*
+            Filter:
+              S3Key:
+                Rules:
+                  - Name: prefix
+                    Value: incoming/
+                  - Name: suffix
+                    Value: .zip
+
+  PipelineFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${PipelineFunction}'
+      RetentionInDays: 7
+
+Outputs:
+  DataBucketName:
+    Description: S3 bucket for incoming and generated pipeline files.
+    Value: !Ref DataBucket
+  PipelineFunctionName:
+    Description: Lambda function name.
+    Value: !Ref PipelineFunction
+  PipelineFunctionArn:
+    Description: Lambda function ARN.
+    Value: !GetAtt PipelineFunction.Arn
+  InputPrefix:
+    Value: incoming/
+  ProcessedPrefix:
+    Value: processed/
+  RejectedPrefix:
+    Value: rejected/
+  ReportsPrefix:
+    Value: reports/
